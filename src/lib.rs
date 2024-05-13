@@ -11,6 +11,11 @@ use image::{
     AnimationDecoder, ExtendedColorType, Frame, ImageEncoder,
 };
 
+// When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
+// allocator.
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 #[wasm_bindgen(js_name = "cropGif")]
 pub fn crop_gif(buffer: Vec<u8>, sx: u32, sy: u32, sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
     let decoder = GifDecoder::new(Cursor::new(buffer)).unwrap();

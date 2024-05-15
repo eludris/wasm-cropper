@@ -6,22 +6,16 @@ onmessage = (e) => {
     switch (e.data.action) {
 
         case ("chunkGif"): {
-            console.log("chunkGif in worker\n\n", e.data)
-
-            let chunked = wasm.chunkGif(e.data.data.buffer, e.data.data.chunks)
-            console.log("chunkGif data\n\n", chunked)
-
             postMessage(
                 {
                     action: "chunkGifWorkerResult",
-                    data: chunked,
+                    data: wasm.chunkGif(e.data.data.buffer, e.data.data.chunks),
                 }
             )
             break;
         }
 
         case ("cropChunk"): {
-            console.log("cropChunk in worker\n\n", e.data)
             postMessage(
                 {
                     action: "cropChunkWorkerResult",
@@ -41,7 +35,6 @@ onmessage = (e) => {
         }
 
         case ("mergeFrames"): {
-            console.log("mergeFrames in worker\n\n", e.data)
             postMessage(
                 {
                     action: "mergeFramesWorkerResult",
@@ -55,7 +48,21 @@ onmessage = (e) => {
             break;
         }
 
-        // TODO: Image cropping
-
+        case ("cropImage"): {
+            console.log(e.data.data)
+            postMessage(
+                {
+                    action: "cropImageWorkerResult",
+                    data: wasm.cropImage(
+                        e.data.data.buffer,
+                        e.data.data.sx,
+                        e.data.data.sy,
+                        e.data.data.sw,
+                        e.data.data.sh,
+                    ),
+                }
+            )
+            break;
+        }
     }
 };

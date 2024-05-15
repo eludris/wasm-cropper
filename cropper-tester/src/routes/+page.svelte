@@ -97,7 +97,18 @@
     updateImagePosition();
   };
 
-  const cropGif = async (): Promise<Blob> => {
+  const cropImpl = async (kind: "GIF" | "image"): Promise<Blob> => {
+    let inEvent: string;
+    let resultEvent: string;
+  
+    if (kind == "GIF") {
+      inEvent = "cropGifInWorker";
+      resultEvent = "cropGifResult";
+    } else {
+      inEvent = "cropImageInWorker";
+      resultEvent = "cropImageResult";
+    }
+
     // Compensate for any scaling automatically done by css...
     let cssScale = image.width / image.naturalWidth;
     let effectiveScale = scale * cssScale;
@@ -105,9 +116,7 @@
     // Dispatch event to start cropper worker...
     document.dispatchEvent(
       new CustomEvent(
-        // Pick event for testing
-        // "cropGifInWorker",
-        "cropGifNoWorker",
+        inEvent,
         {
           detail:
           {
@@ -123,12 +132,13 @@
       )
     )
   
-    let event: CustomEvent<Blob> = await consumeSingleEvent("cropGifResult", ()=>true);
+
     
-    outImage.src = URL.createObjectURL(event.detail)
+    let event: CustomEvent<Blob> = await consumeSingleEvent(resultEvent, ()=>true);
+    
     return event.detail;
   }
-  
+
   const doCrop = async () => {
     updateBoundaries();
 
@@ -137,13 +147,12 @@
     let blob: Blob;
    
     if (contentType == 'image/gif') {
-      // blob = await cropGif();
-      await cropGif()
+      blob = await cropImpl("GIF");
     } else {
-      // blob = await cropGif("image");
+      blob = await cropImpl("image");
     }
     
-    // outImage.src = URL.createObjectURL(blob);
+    outImage.src = URL.createObjectURL(blob);
   }
 
   const cropSkip = () => {

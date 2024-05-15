@@ -5,7 +5,7 @@ import * as events from "$lib/events";
 import * as wasm from "eludris-wasm-cropper";
 
 
-type CropGifEventDetail = {
+type CropEventDetail = {
   buffer: Uint8Array,
   imageWidth: number,
   imageHeight: number,
@@ -14,7 +14,7 @@ type CropGifEventDetail = {
   windowWidth: number,
   windowHeight: number
 };
-type CropGifEvent = CustomEvent<CropGifEventDetail>;
+type CropEvent = CustomEvent<CropEventDetail>;
 
 type ChunkGifResultEvent = CustomEvent<Uint8Array[][]>;
 
@@ -26,11 +26,13 @@ type CropChunkResultEvent = CustomEvent<CropChunkResultEventDetail>;
 
 type MergeFramesResultEvent = CustomEvent<Uint8Array>;
 
+type CropImageResultEvent = CustomEvent<Uint8Array>;
 
 enum CropperEvent {
   CHUNK_GIF_RESULT = "_cropperInternal_ChunkGifResult",
   CROP_CHUNK_RESULT = "_cropperInternal_CropChunkResult",
   MERGE_FRAMES_RESULT = "_cropperInternal_MergeFramesResult",
+  CROP_IMAGE_RESULT = "_cropperInternal_CropImageResult",
 } 
 
 
@@ -38,9 +40,6 @@ const onmessage = (e: MessageEvent<{action: string, data: any, chunk?: number}>)
   switch (e.data.action) {
 
     case ("chunkGifWorkerResult"): {
-      console.log("chunkGifWorkerResult received")
-      console.log(e.data)
-
       document.dispatchEvent(
         new CustomEvent(
           CropperEvent.CHUNK_GIF_RESULT,
@@ -53,9 +52,6 @@ const onmessage = (e: MessageEvent<{action: string, data: any, chunk?: number}>)
     }
 
     case ("cropChunkWorkerResult"): {
-      console.log("cropChunkWorkerResult received")
-      console.log(e.data)
-
       document.dispatchEvent(
         new CustomEvent(
           CropperEvent.CROP_CHUNK_RESULT,
@@ -71,12 +67,21 @@ const onmessage = (e: MessageEvent<{action: string, data: any, chunk?: number}>)
     }
 
     case ("mergeFramesWorkerResult"): {
-      console.log("mergeFramesWorkerResult received")
-      console.log(e.data)
-
       document.dispatchEvent(
         new CustomEvent(
           CropperEvent.MERGE_FRAMES_RESULT,
+          {
+            detail: e.data.data
+          }
+        )
+      )
+      break;
+    }
+
+    case ("cropImageWorkerResult"): {
+      document.dispatchEvent(
+        new CustomEvent(
+          CropperEvent.CROP_IMAGE_RESULT,
           {
             detail: e.data.data
           }
@@ -105,7 +110,7 @@ for (let i = 0; i < window.navigator.hardwareConcurrency; i++) {
 document.addEventListener(
   "cropGifInWorker",
   (
-    async (e: CropGifEvent) => {
+    async (e: CropEvent) => {
       let data = e.detail;
 
       workers[0].postMessage(
@@ -119,13 +124,13 @@ document.addEventListener(
         [data.buffer.buffer]
       )
 
-      let chunks: any[][];  // Array<Array<FrameInfo>>
+      let chunks: Uint8Array[][];
       {
         let event: ChunkGifResultEvent = await events.consumeSingleEvent(CropperEvent.CHUNK_GIF_RESULT);
         chunks = event.detail;
       }
 
-      let croppedChunks: any[];  // Array<FrameInfo>
+      let croppedChunks: Uint8Array[];
       {
         let waiters: Promise<CropChunkResultEvent>[] = []
 
@@ -179,5 +184,40 @@ document.addEventListener(
       )
 
     }
+  ) as events.AsyncEventListener
+)
+
+
+document.addEventListener(
+  "cropImageInWorker",
+  (
+    async (e: CropEvent) => {
+      let data = e.detail;
+
+      workers[0].postMessage(
+        {
+          action: "cropImage",
+          data: {
+            buffer: data.buffer,
+            sx: data.windowX,
+            sy: data.windowY,
+            sw: data.windowWidth,
+            sh: data.windowHeight,
+          }
+        },
+        [data.buffer.buffer]
+      )
+
+      let event: CropImageResultEvent = await events.consumeSingleEvent(CropperEvent.CROP_IMAGE_RESULT);
+      document.dispatchEvent(
+        new CustomEvent(
+          "cropImageResult",
+          {
+            detail: new Blob([event.detail])
+          }
+        )
+      )      
+    }
+
   ) as events.AsyncEventListener
 )

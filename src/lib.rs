@@ -8,7 +8,7 @@ use image::{
         gif::{GifDecoder, GifEncoder, Repeat},
         png::PngEncoder,
     },
-    imageops::{crop, resize, FilterType},
+    imageops::crop,
     AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage,
 };
 
@@ -50,7 +50,7 @@ pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Array {
         })
         .collect::<Vec<Uint8Array>>();
 
-    // Chunk frames into `chunks` chunks of equal length. 
+    // Chunk frames into `chunks` chunks of equal length.
     let chunk_size = (frames.len() / chunks) + ((frames.len() % chunks) > 0) as usize;
     frames
         .chunks(chunk_size)
@@ -75,7 +75,7 @@ pub fn crop_chunk(
             let chunk_buf = a.to_vec();
             let mut reader = BufReader::new(&*chunk_buf);
 
-            // Temporarily strip off/ignore. 
+            // Temporarily strip off/ignore.
             let mut header_buf = [0; 16];
             reader
                 .read_exact(&mut header_buf)
@@ -88,7 +88,7 @@ pub fn crop_chunk(
 
             let mut img =
                 RgbaImage::from_vec(w, h, image_buf).expect("Failed to convert buffer to image.");
- 
+
             let cropped = crop(&mut img, sx, sy, sw, sh);
 
             // Re-prefix with the header data.
@@ -152,22 +152,15 @@ pub fn merge_frames(buffer: Vec<Uint8Array>, w: u32, h: u32) -> Vec<u8> {
 }
 
 #[wasm_bindgen(js_name = "cropImage")]
-pub fn crop_image(
-    buffer: Vec<u8>,
-    sx: u32,
-    sy: u32,
-    sw: u32,
-    sh: u32,
-    dw: u32,
-    dh: u32,
-) -> Vec<u8> {
+pub fn crop_image(buffer: Vec<u8>, sx: u32, sy: u32, sw: u32, sh: u32) -> Vec<u8> {
     let mut img = image::load_from_memory(&buffer).unwrap();
-    let mut cropped = crop(&mut img, sx, sy, sw, sh);
-    let resized = resize(&mut *cropped, dw, dh, FilterType::Nearest);
+    let cropped = crop(&mut img, sx, sy, sw, sh);
+
+    let buf = cropped.to_image().into_vec();
 
     let mut out = Cursor::new(vec![]);
     PngEncoder::new(&mut out)
-        .write_image(&resized, dw, dh, ExtendedColorType::Rgba8)
+        .write_image(&buf[..], sw, sh, ExtendedColorType::Rgba8)
         .unwrap();
 
     out.into_inner()

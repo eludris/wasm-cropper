@@ -1,109 +1,136 @@
-use std::{fs::File, io::Read};
-use std::io::Cursor;
+// This file just serves to test the implementation;
+// anything here is a reimplementation of everything in lib.rs, but in
+// native rust types (hence there is no use::wasm_bindgen).
 
+use std::io::{BufReader, Cursor};
+use std::{fs::File, io::Read};
 
 use image::{
-    codecs::{
-        gif::{GifDecoder, GifEncoder, Repeat},
-        png::PngEncoder,
-    }, imageops::{crop, resize, FilterType}, ImageDecoder, AnimationDecoder, Delay, ExtendedColorType, Frame, ImageBuffer, ImageEncoder, Rgba, RgbaImage, SubImage
+    codecs::gif::{GifDecoder, GifEncoder, Repeat},
+    imageops::crop,
+    AnimationDecoder, Delay, Frame, RgbaImage,
 };
-
-use serde::{Serialize, Deserialize};
-use wasm_bindgen_test::console_log;
-// use itertools::Itertools;
-
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-
-#[derive(Clone)]
-pub struct FrameInfo {
-    delay: Delay,
-    left: u32,
-    top: u32,
-    buffer: Vec<u8>,
-}
-
-
-impl FrameInfo {
-    fn from_frame(frame: Frame) -> Self {
-        Self {
-            delay: frame.delay(),
-            left: frame.left(),
-            top: frame.top(),
-            buffer: frame.into_buffer().into_vec()
-        }
-    }
-
-    fn update_buffer(&mut self, buffer: Vec<u8>) {
-        self.buffer = buffer;
-    }
-
-    fn into_frame(self, w: u32, h: u32) -> Frame {
-        let img = RgbaImage::from_vec(w, h, self.buffer.to_vec()).unwrap();
-        Frame::from_parts(img, self.left, self.top, self.delay)
-    }
-}
-
-
-pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Vec<Vec<FrameInfo>>
-{
+pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Vec<Vec<Vec<u8>>> {
     let decoder = GifDecoder::new(Cursor::new(buffer)).unwrap();
-    let frames: Vec<FrameInfo> = decoder
+    let frames: Vec<Vec<u8>> = decoder
         .into_frames()
         .map(|f| {
-            FrameInfo::from_frame(f.unwrap())
+            let frame = f.unwrap();
+            let delay = frame.delay().numer_denom_ms();
+
+            let mut buffer: Vec<u8> = vec![];
+            buffer.extend(&frame.left().to_be_bytes());
+            buffer.extend(&frame.top().to_be_bytes());
+            buffer.extend(&delay.0.to_be_bytes());
+            buffer.extend(&delay.1.to_be_bytes());
+            buffer.extend(&frame.into_buffer().into_vec());
+
+            buffer
         })
         .collect();
 
     let chunk_size = (frames.len() / chunks) + ((frames.len() % chunks) > 0) as usize;
-     frames
-        .chunks(chunk_size)
-        .map(|c| c.to_vec())
-        .collect()
+    frames.chunks(chunk_size).map(|c| c.to_vec()).collect()
 }
 
-
 pub fn crop_chunk(
-    buffer: Vec<FrameInfo>,
+    buffer: Vec<Vec<u8>>,
     w: u32,
     h: u32,
     sx: u32,
     sy: u32,
     sw: u32,
     sh: u32,
-) -> Vec<FrameInfo> {
+) -> Vec<Vec<u8>> {
     buffer
         .into_iter()
-        .map(|mut f| {
-            let mut img = RgbaImage::from_vec(w, h, f.buffer.to_vec()).unwrap();
+        .map(|a| {
+            let a_vec = a.to_vec();
+            let mut reader = BufReader::new(&*a_vec);
+
+            let mut buf = [0; 16];
+            reader
+                .read_exact(&mut buf)
+                .expect("Failed to read header data.");
+
+            let mut actual_buf = vec![];
+            reader
+                .read_to_end(&mut actual_buf)
+                .expect("Failed to read buffer data.");
+
+            let mut buf1 = a_vec.clone();
+            let buf2 = buf1.split_off(16);
+
+            println!(
+                "buf1 {}, buf {}, buf2 {}, actual_buf {}",
+                buf1.len(),
+                buf.len(),
+                buf2.len(),
+                actual_buf.len()
+            );
+
+            let mut img =
+                RgbaImage::from_vec(w, h, actual_buf).expect("Failed to convert buffer to image.");
             let cropped = crop(&mut img, sx, sy, sw, sh);
-            f.update_buffer(cropped.to_image().into_vec());
-            f
+
+            let mut buf_fr = buf.to_vec();
+            buf_fr.extend(cropped.to_image().into_vec());
+
+            buf_fr
         })
         .collect()
 }
 
-
-pub fn combine_chunks(
-    chunks: Vec<FrameInfo>, w: u32, h: u32,
-) -> Vec<u8> {
+pub fn merge_frames(buffer: Vec<Vec<u8>>, w: u32, h: u32) -> Vec<u8> {
     let mut out = Cursor::new(vec![]);
+
     {
         let mut encoder = GifEncoder::new(&mut out);
         encoder.set_repeat(Repeat::Infinite).unwrap();
-        encoder.encode_frames(
-            chunks.into_iter().map(|f| {
-                print!("issa frame");
-                f.into_frame(w, h)}
-            ).collect::<Vec<Frame>>()
-        ).unwrap();
+        encoder
+            .encode_frames(buffer.into_iter().map(|a| {
+                let a_vec = a.to_vec();
+                let mut reader = BufReader::new(&*a_vec);
+
+                let mut buf = [0; 4];
+                reader
+                    .read_exact(&mut buf)
+                    .expect("Failed to read left from header data.");
+                let left = u32::from_be_bytes(buf);
+
+                reader
+                    .read_exact(&mut buf)
+                    .expect("Failed to read top from header data.");
+                let top = u32::from_be_bytes(buf);
+
+                reader
+                    .read_exact(&mut buf)
+                    .expect("Failed to read numerator from header data.");
+                let num = u32::from_be_bytes(buf);
+
+                reader
+                    .read_exact(&mut buf)
+                    .expect("Failed to read denominator from header data.");
+                let denom = u32::from_be_bytes(buf);
+
+                let mut buf_fr = vec![];
+                reader
+                    .read_to_end(&mut buf_fr)
+                    .expect("Failed to read image data from buffer.");
+
+                let img = RgbaImage::from_vec(w, h, buf_fr)
+                    .expect("Failed to read buffer into RgbaImage.");
+                Frame::from_parts(img, left, top, Delay::from_numer_denom_ms(num, denom))
+            }))
+            .expect("Failed to encode GIF.");
     }
+
     out.into_inner()
 }
-
 
 fn main() {
     let mut buf = vec![];
@@ -113,20 +140,21 @@ fn main() {
     let chunks = 4;
     let chunked = chunk_gif(buf, chunks);
 
-    let mut data: Vec<FrameInfo> = vec![];
+    let mut data: Vec<Vec<u8>> = vec![];
     for i in 0..chunks {
-        data.extend(
-            crop_chunk(chunked[i].to_owned(), 500, 500, 100, 100, 200, 200)
-        )
+        data.extend(crop_chunk(
+            chunked[i].to_owned(),
+            500,
+            500,
+            100,
+            100,
+            200,
+            200,
+        ))
     }
 
-    let new_buf = combine_chunks(data, 200, 200);
+    let _new_buf = merge_frames(data, 200, 200);
 
-    image::save_buffer(
-        "testgif.gif",
-        &new_buf,
-        500,
-        500,
-        ExtendedColorType::Rgba8,
-    ).unwrap();
+    // If this is reached, everything worked, yay!
+    println!("we did a thing");
 }

@@ -1,10 +1,6 @@
 import * as wasm from "eludris-wasm-cropper";
 
-
 wasm.init_panic_hook();
-
-const xd = Object.getPrototypeOf(wasm.FrameInfo);
-
 
 onmessage = (e) => {
     switch (e.data.action) {
@@ -44,15 +40,15 @@ onmessage = (e) => {
             break;
         }
 
-        case ("combineChunks"): {
-            console.log("combineChunks in worker\n\n", e.data)
+        case ("mergeFrames"): {
+            console.log("mergeFrames in worker\n\n", e.data)
             postMessage(
                 {
-                    action: "combineChunksWorkerResult",
-                    data: wasm.combineChunks(
+                    action: "mergeFramesWorkerResult",
+                    data: wasm.mergeFrames(
                         e.data.data.buffer,
-                        e.data.data.sw,
-                        e.data.data.sh,
+                        e.data.data.w,
+                        e.data.data.h,
                     ),
                 }
             )

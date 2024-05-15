@@ -1,19 +1,18 @@
-use std::io::Cursor;
+use std::io::{BufReader, Cursor, Read};
 
 use js_sys::{Array, Uint8Array};
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 use image::{
     codecs::{
         gif::{GifDecoder, GifEncoder, Repeat},
         png::PngEncoder,
-    }, imageops::{crop, resize, FilterType}, AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage
+    },
+    imageops::{crop, resize, FilterType},
+    AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage,
 };
 
 use console_error_panic_hook;
-
-use wasm_bindgen_test::console_log;
-// use itertools::Itertools;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -21,119 +20,136 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[wasm_bindgen]
 pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
-    console_log!("wee");
 }
-
-#[wasm_bindgen]
-pub struct FrameInfo {
-    delay: Delay,
-    left: u32,
-    top: u32,
-    buffer: Uint8Array,
-}
-
-
-impl FrameInfo {
-    fn from_frame(frame: Frame) -> Self {
-        Self {
-            delay: frame.delay(),
-            left: frame.left(),
-            top: frame.top(),
-            buffer: Uint8Array::from(&frame.into_buffer().into_vec()[..])
-        }
-    }
-
-    fn update_buffer(&mut self, buffer: Vec<u8>) {
-        self.buffer = Uint8Array::from(&buffer[..]);
-    }
-
-    fn into_frame(self, w: u32, h: u32) -> Frame {
-        let img = RgbaImage::from_vec(w, h, self.buffer.to_vec()).unwrap();
-        Frame::from_parts(img, self.left, self.top, self.delay)
-    }
-}
-
 
 #[wasm_bindgen(js_name = "chunkGif")]
-pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Array
-{
+pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Array {
     let decoder = GifDecoder::new(Cursor::new(buffer)).unwrap();
+
+    // Decode frames into a JavaScript Uint8Array, then collect.
     let frames = decoder
         .into_frames()
         .map(|f| {
-            let xd = FrameInfo::from_frame(f.unwrap());
-            JsValue::from(xd)
-        })
-        .collect::<Vec<JsValue>>();
+            let frame = f.unwrap();
+            let delay = frame.delay().numer_denom_ms();
 
+            // To get around a number of limitations, we prepend important frame
+            // data to the buffer of each frame, so we can extract it later.
+            // We *would* do this with a more sensible approach such as a struct,
+            // but due to a limitation in web-workers -- where the prototype of
+            // an object is stripped when it is moved into/out of the worker --
+            // we found that this is the most reliable way.
+            let mut buffer: Vec<u8> = vec![];
+            buffer.extend(&frame.left().to_be_bytes());
+            buffer.extend(&frame.top().to_be_bytes());
+            buffer.extend(&delay.0.to_be_bytes());
+            buffer.extend(&delay.1.to_be_bytes());
+            buffer.extend(&frame.into_buffer().into_vec());
+
+            Uint8Array::from(&buffer[..])
+        })
+        .collect::<Vec<Uint8Array>>();
+
+    // Chunk frames into `chunks` chunks of equal length. 
     let chunk_size = (frames.len() / chunks) + ((frames.len() % chunks) > 0) as usize;
-     frames
+    frames
         .chunks(chunk_size)
         .map(|c| c.iter().collect::<Array>())
         .collect()
 }
 
-
 #[wasm_bindgen(js_name = "cropChunk")]
 pub fn crop_chunk(
-    buffer: Vec<FrameInfo>,
+    buffer: Vec<Uint8Array>,
     w: u32,
     h: u32,
     sx: u32,
     sy: u32,
     sw: u32,
     sh: u32,
-) -> Vec<FrameInfo> {
+) -> Vec<Uint8Array> {
+    // Crop a chunk to the desired size.
     buffer
         .into_iter()
-        .map(|mut f| {
-            let mut img = RgbaImage::from_vec(w, h, f.buffer.to_vec()).unwrap();
+        .map(|a| {
+            let chunk_buf = a.to_vec();
+            let mut reader = BufReader::new(&*chunk_buf);
+
+            // Temporarily strip off/ignore. 
+            let mut header_buf = [0; 16];
+            reader
+                .read_exact(&mut header_buf)
+                .expect("Failed to read header data.");
+
+            let mut image_buf = vec![];
+            reader
+                .read_to_end(&mut image_buf)
+                .expect("Failed to read buffer data.");
+
+            let mut img =
+                RgbaImage::from_vec(w, h, image_buf).expect("Failed to convert buffer to image.");
+ 
             let cropped = crop(&mut img, sx, sy, sw, sh);
-            f.update_buffer(cropped.to_image().into_vec());
-            f
+
+            // Re-prefix with the header data.
+            let mut cropped_buf = header_buf.to_vec();
+            cropped_buf.extend(cropped.to_image().into_vec());
+
+            Uint8Array::from(&cropped_buf[..])
         })
         .collect()
 }
 
-
-#[wasm_bindgen(js_name = "combineChunks")]
-pub fn combine_chunks(
-    chunks: Vec<FrameInfo>, w: u32, h: u32,
-) -> Vec<u8> {
+#[wasm_bindgen(js_name = "mergeFrames")]
+pub fn merge_frames(buffer: Vec<Uint8Array>, w: u32, h: u32) -> Vec<u8> {
     let mut out = Cursor::new(vec![]);
+
     {
         let mut encoder = GifEncoder::new(&mut out);
-        encoder.encode_frames(
-            chunks.into_iter().map(|f| f.into_frame(w, h)).collect::<Vec<Frame>>()
-        ).unwrap();
         encoder.set_repeat(Repeat::Infinite).unwrap();
+        encoder
+            .encode_frames(buffer.into_iter().map(|a| {
+                let chunk_buf = a.to_vec();
+                let mut reader = BufReader::new(&*chunk_buf);
+
+                // Now we actually extract the individual header items;
+                // each item is a u32, so 4 items of our Vec<u8>.
+                let mut header_buf = [0; 4];
+                reader
+                    .read_exact(&mut header_buf)
+                    .expect("Failed to read left from header data.");
+                let left = u32::from_be_bytes(header_buf);
+
+                reader
+                    .read_exact(&mut header_buf)
+                    .expect("Failed to read top from header data.");
+                let top = u32::from_be_bytes(header_buf);
+
+                reader
+                    .read_exact(&mut header_buf)
+                    .expect("Failed to read numerator from header data.");
+                let num = u32::from_be_bytes(header_buf);
+
+                reader
+                    .read_exact(&mut header_buf)
+                    .expect("Failed to read denominator from header data.");
+                let denom = u32::from_be_bytes(header_buf);
+
+                // Now we extract the image data.
+                let mut image_buf = vec![];
+                reader
+                    .read_to_end(&mut image_buf)
+                    .expect("Failed to read image data from buffer.");
+
+                let img = RgbaImage::from_vec(w, h, image_buf)
+                    .expect("Failed to read buffer into RgbaImage.");
+                Frame::from_parts(img, left, top, Delay::from_numer_denom_ms(num, denom))
+            }))
+            .expect("Failed to encode GIF.");
     }
+
     out.into_inner()
 }
-
-
-#[wasm_bindgen(js_name = "cropGif")]
-pub fn crop_gif(buffer: Vec<u8>, sx: u32, sy: u32, sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
-    let decoder = GifDecoder::new(Cursor::new(buffer)).unwrap();
-    let frames: Vec<Frame> = decoder
-        .into_frames()
-        .map(|f| {
-            let mut frame = f.unwrap();
-            let mut cropped = crop(frame.buffer_mut(), sx, sy, sw, sh);
-            let resized = resize(&mut *cropped, dw, dh, FilterType::Nearest);
-            Frame::from_parts(resized, frame.left(), frame.top(), frame.delay())
-        })
-        .collect();
-
-    let mut out = Cursor::new(vec![]);
-    {
-        let mut encoder = GifEncoder::new(&mut out);
-        encoder.encode_frames(frames).unwrap();
-        encoder.set_repeat(Repeat::Infinite).unwrap();
-    }
-    out.into_inner()
-}
-
 
 #[wasm_bindgen(js_name = "cropImage")]
 pub fn crop_image(

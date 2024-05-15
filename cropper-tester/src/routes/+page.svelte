@@ -106,8 +106,8 @@
     document.dispatchEvent(
       new CustomEvent(
         // Pick event for testing
-        "cropGifInWorker",
-        // "cropGifNoWorker",
+        // "cropGifInWorker",
+        "cropGifNoWorker",
         {
           detail:
           {

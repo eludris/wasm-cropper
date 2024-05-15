@@ -24,13 +24,13 @@ type CropChunkResultEventDetail = {
 };
 type CropChunkResultEvent = CustomEvent<CropChunkResultEventDetail>;
 
-type CombineChunksResultEvent = CustomEvent<Uint8Array>;
+type MergeFramesResultEvent = CustomEvent<Uint8Array>;
 
 
 enum CropperEvent {
   CHUNK_GIF_RESULT = "_cropperInternal_ChunkGifResult",
   CROP_CHUNK_RESULT = "_cropperInternal_CropChunkResult",
-  COMBINE_CHUNKS_RESULT = "_cropperInternal_CombineChunksResult",
+  MERGE_FRAMES_RESULT = "_cropperInternal_MergeFramesResult",
 } 
 
 
@@ -70,13 +70,13 @@ const onmessage = (e: MessageEvent<{action: string, data: any, chunk?: number}>)
       break;
     }
 
-    case ("combineChunksWorkerResult"): {
-      console.log("combineChunksWorkerResult received")
+    case ("mergeFramesWorkerResult"): {
+      console.log("mergeFramesWorkerResult received")
       console.log(e.data)
 
       document.dispatchEvent(
         new CustomEvent(
-          CropperEvent.COMBINE_CHUNKS_RESULT,
+          CropperEvent.MERGE_FRAMES_RESULT,
           {
             detail: e.data.data
           }
@@ -94,7 +94,7 @@ const onerror = (e: ErrorEvent) => {
 
 
 let workers = [];
-for (let i = 0; i < 2; i++) {  // window.navigator.hardwareConcurrency
+for (let i = 0; i < window.navigator.hardwareConcurrency; i++) {
   let worker = new MyWorker;
   workers.push(worker);
   worker.onmessage = onmessage;
@@ -116,7 +116,7 @@ document.addEventListener(
             chunks: workers.length,
           }
         },
-        // [data.buffer.buffer]
+        [data.buffer.buffer]
       )
 
       let chunks: any[][];  // Array<Array<FrameInfo>>
@@ -159,7 +159,7 @@ document.addEventListener(
       
       workers[0].postMessage(
         {
-          action: "combineChunks",
+          action: "mergeFrames",
           data: {
             buffer: croppedChunks,
             w: data.windowWidth,
@@ -168,7 +168,7 @@ document.addEventListener(
         },
       )
 
-      let combined: CombineChunksResultEvent = await events.consumeSingleEvent(CropperEvent.COMBINE_CHUNKS_RESULT);
+      let combined: MergeFramesResultEvent = await events.consumeSingleEvent(CropperEvent.MERGE_FRAMES_RESULT);
       document.dispatchEvent(
         new CustomEvent(
           "cropGifResult",
@@ -178,65 +178,6 @@ document.addEventListener(
         )
       )
 
-    }
-  ) as events.AsyncEventListener
-)
-
-
-// Temporary thing to figure out why workers don't work
-document.addEventListener(
-  "cropGifNoWorker",
-  (
-    async (e: CropGifEvent) => {
-      let data = e.detail;
-
-      let chunks = wasm.chunkGif(data.buffer, workers.length)
-
-      console.log(
-        data.imageWidth,
-        data.imageHeight,
-        data.windowX,
-        data.windowY,
-        data.windowWidth,
-        data.windowHeight
-      )
-
-      let croppedChunks = []
-      for (let i = 0; i < workers.length; i++) {
-        let res = wasm.cropChunk(
-          chunks[i],
-          data.imageWidth,
-          data.imageHeight,
-          data.windowX,
-          data.windowY,
-          data.windowWidth,
-          data.windowHeight
-        )
-        croppedChunks.push(...res)
-      }
-
-      console.log(croppedChunks)
-
-      let result = wasm.combineChunks(
-        croppedChunks,
-        data.windowWidth,
-        data.windowHeight
-      )
-
-      // This is listener is blocking, so we give the "caller" time to start listening.
-      setTimeout(
-        () => {
-          document.dispatchEvent(
-            new CustomEvent(
-              "cropGifResult",
-              {
-                detail: new Blob([result])
-              }
-            )
-          )
-        },
-        10
-      )
     }
   ) as events.AsyncEventListener
 )

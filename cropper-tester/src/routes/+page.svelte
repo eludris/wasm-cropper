@@ -1,6 +1,8 @@
 <script lang="ts">
   // Based on https://github.com/eludris/client
 
+  import { consumeSingleEvent } from "$lib/events";
+
   let image: HTMLImageElement // = document.createElement('img');
   let cutout: HTMLDivElement // = document.createElement('div');
   let outImage: HTMLImageElement // = document.createElement('img');
@@ -95,18 +97,7 @@
     updateImagePosition();
   };
 
-  const cropImpl = async (kind: "gif" | "image"): Promise<Blob> => {
-    // Set correct image boundaries...
-    let outputWidth: number;
-    let outputHeight: number;
-
-    if (cropperKind == "banner") {
-      outputHeight = 512;
-      outputWidth = outputHeight * 6;
-    } else {
-      outputHeight = outputWidth = 256;
-    }
-
+  const cropGif = async (): Promise<Blob> => {
     // Compensate for any scaling automatically done by css...
     let cssScale = image.width / image.naturalWidth;
     let effectiveScale = scale * cssScale;
@@ -114,32 +105,28 @@
     // Dispatch event to start cropper worker...
     document.dispatchEvent(
       new CustomEvent(
-        "startCropper",
+        // Pick event for testing
+        "cropGifInWorker",
+        // "cropGifNoWorker",
         {
-          detail: [
-            kind,
-            new Uint8Array(await cropperFile!.arrayBuffer()),
-            (xBoundary - imageX) / cssScale,
-            (yBoundary - imageY) / cssScale,
-            cutout.clientWidth / effectiveScale,
-            cutout.clientHeight / effectiveScale,
-            outputWidth,
-            outputHeight
-          ]
+          detail:
+          {
+            buffer: new Uint8Array(await cropperFile!.arrayBuffer()),
+            imageWidth: image.naturalWidth,
+            imageHeight: image.naturalHeight,
+            windowX: (xBoundary - imageX) / cssScale,
+            windowY: (yBoundary - imageY) / cssScale,
+            windowWidth: cutout.clientWidth / effectiveScale,
+            windowHeight: cutout.clientHeight / effectiveScale
+          }
         }
       )
     )
   
-    // Wait for cropper worker to finish
-    return await new Promise((resolve) => {
-      const listener = (
-        (e: CustomEvent<Blob>) => {
-          document.removeEventListener("cropComplete", listener);
-          resolve(e.detail);
-        }
-      ) as EventListener;
-      document.addEventListener("cropComplete", listener);
-    })
+    let event: CustomEvent<Blob> = await consumeSingleEvent("cropGifResult", ()=>true);
+    
+    outImage.src = URL.createObjectURL(event.detail)
+    return event.detail;
   }
   
   const doCrop = async () => {
@@ -150,12 +137,13 @@
     let blob: Blob;
    
     if (contentType == 'image/gif') {
-      blob = await cropImpl("gif");
+      // blob = await cropGif();
+      await cropGif()
     } else {
-      blob = await cropImpl("image");
+      // blob = await cropGif("image");
     }
     
-    outImage.src = URL.createObjectURL(blob);
+    // outImage.src = URL.createObjectURL(blob);
   }
 
   const cropSkip = () => {

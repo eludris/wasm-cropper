@@ -1,0 +1,19 @@
+{
+  "name": "eludris-wasm-cropper",
+  "collaborators": [
+    "Chromosomologist <chromosomologist@gmail.com>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "eludris_wasm_cropper_bg.wasm",
+    "eludris_wasm_cropper.js",
+    "eludris_wasm_cropper_bg.js",
+    "eludris_wasm_cropper.d.ts"
+  ],
+  "module": "eludris_wasm_cropper.js",
+  "types": "eludris_wasm_cropper.d.ts",
+  "sideEffects": [
+    "./eludris_wasm_cropper.js",
+    "./snippets/*"
+  ]
+}

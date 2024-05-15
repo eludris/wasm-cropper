@@ -49,7 +49,6 @@ onmessage = (e) => {
         }
 
         case ("cropImage"): {
-            console.log(e.data.data)
             postMessage(
                 {
                     action: "cropImageWorkerResult",

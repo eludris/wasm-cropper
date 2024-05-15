@@ -20,9 +20,9 @@ jobs:
       - name: check-changes
         run: |
           if git diff --quiet ./src; then
-            echo '::set-output name=continue::true'
+            echo 'continue=true' >> $GITHUB_OUTPUT
           else
-            echo '::set-output name=continue::false'
+            echo 'continue=false' >> $GITHUB_OUTPUT
           fi
 
   build:

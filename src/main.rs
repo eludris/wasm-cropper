@@ -148,12 +148,12 @@ fn main() {
             500,
             100,
             100,
-            200,
-            200,
+            300,
+            300,
         ))
     }
 
-    let _new_buf = merge_frames(data, 200, 200);
+    let _new_buf = merge_frames(data, 300, 300);
 
     // If this is reached, everything worked, yay!
     println!("we did a thing");

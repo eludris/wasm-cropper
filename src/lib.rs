@@ -1,3 +1,5 @@
+mod utils;
+
 use std::io::{BufReader, Cursor, Read};
 
 use js_sys::{Array, Uint8Array};
@@ -7,12 +9,12 @@ use image::{
     codecs::{
         gif::{GifDecoder, GifEncoder, Repeat},
         png::PngEncoder,
-    },
-    imageops::crop,
-    AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage,
+    }, AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage
 };
 
 use console_error_panic_hook;
+
+use utils::crop_to_size;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -63,8 +65,8 @@ pub fn crop_chunk(
     buffer: Vec<Uint8Array>,
     w: u32,
     h: u32,
-    sx: u32,
-    sy: u32,
+    sx: i32,
+    sy: i32,
     sw: u32,
     sh: u32,
 ) -> Vec<Uint8Array> {
@@ -86,14 +88,14 @@ pub fn crop_chunk(
                 .read_to_end(&mut image_buf)
                 .expect("Failed to read buffer data.");
 
-            let mut img =
+            let img =
                 RgbaImage::from_vec(w, h, image_buf).expect("Failed to convert buffer to image.");
 
-            let cropped = crop(&mut img, sx, sy, sw, sh);
+            let cropped = crop_to_size(img, sx, sy, sw, sh);
 
             // Re-prefix with the header data.
             let mut cropped_buf = header_buf.to_vec();
-            cropped_buf.extend(cropped.to_image().into_vec());
+            cropped_buf.extend(cropped);
 
             Uint8Array::from(&cropped_buf[..])
         })
@@ -152,11 +154,9 @@ pub fn merge_frames(buffer: Vec<Uint8Array>, w: u32, h: u32) -> Vec<u8> {
 }
 
 #[wasm_bindgen(js_name = "cropImage")]
-pub fn crop_image(buffer: Vec<u8>, sx: u32, sy: u32, sw: u32, sh: u32) -> Vec<u8> {
-    let mut img = image::load_from_memory(&buffer).unwrap();
-    let cropped = crop(&mut img, sx, sy, sw, sh);
-
-    let buf = cropped.to_image().into_vec();
+pub fn crop_image(buffer: Vec<u8>, sx: i32, sy: i32, sw: u32, sh: u32) -> Vec<u8> {
+    let img = image::load_from_memory(&buffer).expect("Failed to read buffer into image.");
+    let buf = crop_to_size(img.into(), sx, sy, sw, sh);
 
     let mut out = Cursor::new(vec![]);
     PngEncoder::new(&mut out)

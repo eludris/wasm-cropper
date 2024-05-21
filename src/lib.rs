@@ -9,7 +9,8 @@ use image::{
     codecs::{
         gif::{GifDecoder, GifEncoder, Repeat},
         png::PngEncoder,
-    }, AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage
+    },
+    AnimationDecoder, Delay, ExtendedColorType, Frame, ImageEncoder, RgbaImage,
 };
 
 use console_error_panic_hook;
@@ -29,7 +30,7 @@ pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Array {
     let decoder = GifDecoder::new(Cursor::new(buffer)).unwrap();
 
     // Decode frames into a JavaScript Uint8Array, then collect.
-    let frames = decoder
+    let mut frames = decoder
         .into_frames()
         .map(|f| {
             let frame = f.unwrap();
@@ -53,11 +54,24 @@ pub fn chunk_gif(buffer: Vec<u8>, chunks: usize) -> Array {
         .collect::<Vec<Uint8Array>>();
 
     // Chunk frames into `chunks` chunks of equal length.
-    let chunk_size = (frames.len() / chunks) + ((frames.len() % chunks) > 0) as usize;
-    frames
-        .chunks(chunk_size)
-        .map(|c| c.iter().collect::<Array>())
-        .collect()
+    let chunk_size = frames.len() / chunks;
+    let remainder = frames.len() % chunks;
+
+    let mut chunked: Vec<Vec<Uint8Array>> = vec![];
+
+    for _ in 0..remainder {
+        chunked.push(frames.drain(..chunk_size + 1).collect());
+    }
+
+    for _ in remainder..chunks {
+        chunked.push(frames.drain(..chunk_size).collect());
+    }
+
+    // Convert to JS types.
+    chunked
+        .iter()
+        .map(|v| v.iter().collect::<Array>())
+        .collect::<Array>()
 }
 
 #[wasm_bindgen(js_name = "cropChunk")]

@@ -3,7 +3,7 @@
     "collaborators": [
       "Chromosomologist <chromosomologist@gmail.com>"
     ],
-    "version": "0.1.0",
+    "version": "0.1.1",
     "files": [
       "./pkg/eludris_wasm_cropper_bg.wasm",
       "./pkg/eludris_wasm_cropper.js",

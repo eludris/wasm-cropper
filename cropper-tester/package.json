@@ -30,9 +30,9 @@
 		"vite": "^5.0.3"
 	},
 	"dependencies": {
+		"eludris-wasm-cropper": "file:../pkg",
 		"vite-plugin-top-level-await": "^1.4.1",
-		"vite-plugin-wasm": "^3.3.0",
-		"eludris-wasm-cropper": "file:../pkg"
+		"vite-plugin-wasm": "^3.3.0"
 	},
 	"type": "module"
 }
